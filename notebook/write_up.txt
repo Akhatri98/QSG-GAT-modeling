@@ -1,0 +1,111 @@
+ABSTRACT
+-> utils.py contains global values (like dir and constants) for all scripts.
+-> build_index.py joins the prices and news datasets while constructing labels.
+-> extract_features.py builds TF-IDF and scalar features for the model.
+-> train_evaluate.py runs a hyperparameter sweep and returns the best model.
+-> visualize.py creates a few plots to analyze model performance
+
+
+OVERNIGHT FILTER
+-> The trickiest part of this dataset is figuring out which news is actually
+  tradeable at the open to avoid lookahead bias and only focus on overnight
+  news. So, I opted to focus on 3 "buckets".
+  -> Pre-open (< 09:30), target = same calendar date
+  -> After-close (>= 16:00), target = next trading day
+  -> Intraday [09:30, 16:00), removed
+
+-> Intraday news can't be acted on at the open because by the time it appears,
+  the position would already be live. 733 intraday rows were dropped across the 
+  news datasets.
+
+-> next-trading-day lookup is built from the price file itself rather than
+a holiday library. Dates with no associated price are not trading days.
+
+
+IN/OUT-OF-SAMPLE
+-> To avoid leakage, create an explicit split of training and testing data.
+  I opted to use 2021-2023 for training and then 2024 data for testing.
+  -> Train: 1,001 rows (Nov 2021 – Dec 2023)
+  -> Test: 596 rows (Jan 2024 – Dec 2024)
+
+-> TF-IDF vectors are fit on training rows only and then applied to both
+splits. No label information enters feature construction.
+
+
+FEATURES
+-> TF-IDF on headlines (max 100 features, uni/bigrams, min_df=2)
+-> TF-IDF on body text, same settings, with a regex pass to remove standard
+  legal boilerplate first
+-> headline word count, is_priced, is_proposed, is_after_close, 
+  log offering size parsed from headline ($10B cap to avoid false positives 
+  from AUM mentions, which happened during testing)
+
+-> Random forests and gradient boosting were tried but did not improve on
+  regularized linear models given the smaller training set.
+
+
+RESULTS
+-> Baseline : 60.7% direction accuracy
+  -> Model , Dir. Acc , MAE , R^2
+  1. Ridge (threshold=0) , 61.1% , 0.118 , -0.016
+  2. Logistic , 60.9% , N/A , N/A
+
+-> Below are interpretations of each plot produced
+
+-> return_distribution.png: Train returns are left-skewed with a mean around
+  -0.058, test returns are less negative (mean ~-0.026). There is wide
+  variance, with a long right tail from a handful of large positive moves.
+
+-> direction_balance.png: The 64/36 down/up split is consistent across all four
+  years, so the class imbalance is an attribute of the dataset rather than a 
+  specific year. 2024 is slightly less negative than prior years, which 
+  lines up with the return distribution shift noted above for the test set.
+
+-> return_by_session.png: After-close news produces more negative returns than
+  pre-open news in both train and test. This makes sense as after-close
+  announcements have a full overnight reactions before open, so the events are
+  more closely fully priced by the time market opens. This is also why 
+  is_after_close is a meaningful feature.
+
+-> confusion_matrices.png: Both models predict down the majority of the time, 
+  consistent with the training distribution skew we noticed. The logistic model 
+  has low up-recall, which implies it isn't truly bidirectional.
+
+-> top_features.png: For ridge and logistic coefficients, "Underwritten" and 
+  "announces pricing" load negatively, while "proposed" and "closing
+  conditions" load positively. The best market interpretation of this is from
+  dilution news leaning to negativity. Scalar features like is_after_close and 
+  offering_size_log also appear in the top 15, validating that they carry 
+  meaningful signal beyond just the text.
+
+-> predicted_vs_actual.png: The scatter of Ridge predictions vs actual returns
+is closely vertical around zero, meaning the model has very low variance in
+its predictions and is not differentiating well on magnitude. This is 
+consistent with the near-zero R^2 value. The direction signal isn't coming 
+from magnitude calls, rather smaller shifts in prediction sign.
+
+
+FAILURES
+-> The training set is ~1,000 rows — which is thin for NLP. Coefficients are 
+  noisy and regularization is doing a lot of work.
+
+-> Train return mean (-0.058) and test return mean (-0.026) differ. The model
+  trained in a more negative environment than it predicts in, which likely
+  contributes to predicting down 86% of the time when only 61% are actually
+  down.
+-> Boilerplate removal is incomplete. The regex strips ~8% of body text on
+  average. The body TF-IDF vocabulary still contains generic legal language
+  that likely adds noise.
+
+-> TF-IDF vocabulary is frozen at train time. New deal terminology from 2024
+  gets zero weight. Correct for leakage prevention but it means the model
+  degrades as vocab changes.
+
+-> No position sizing. The model predicts direction only. Real use would
+  require magnitude or confidence estimates, neither of which this model
+  provides reliably at ~0 R^2 after sweeping and testing.
+
+
+REPRODUCIBILITY
+-> RANDOM_SEED = 42 in utils.py, passed explicitly to all sklearn models.
+  numpy.random.seed(42) set at the top of each script.
