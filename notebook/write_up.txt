@@ -6,6 +6,11 @@ ABSTRACT
 -> visualize.py creates a few plots to analyze model performance
 
 
+TARGET DEFINITION
+-> Label = (close - open) / open on the assigned target date
+-> Binary direction label stored as 1 = positive, 0 = flat/negative
+
+
 OVERNIGHT FILTER
 -> The trickiest part of this dataset is figuring out which news is actually
   tradeable at the open to avoid lookahead bias and only focus on overnight
@@ -109,3 +114,8 @@ FAILURES
 REPRODUCIBILITY
 -> RANDOM_SEED = 42 in utils.py, passed explicitly to all sklearn models.
   numpy.random.seed(42) set at the top of each script.
+-> Run order listed below (visualize.py is optional, it generates plots),
+  py src/build_index.py
+  py src/extract_features.py
+  py src/train_evaluate.py
+  py src/visualize.py
