@@ -104,7 +104,7 @@ def plotReturnDistribution(index, trainMask):
     bins = np.linspace(-0.6, 0.6, 60)
     for ax, (label, mask), color in zip(
         axes,
-        [("Train (2021-2023)", trainMask), ("Test (2024)", ~trainMask)],
+        [("Train (2021-2022)", trainMask), ("Test (2024)", ~trainMask)],
         [BLUE, RED]
     ):
         data = index.loc[mask, "return"].clip(-0.6, 0.6)

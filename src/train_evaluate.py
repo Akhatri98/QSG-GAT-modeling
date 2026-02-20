@@ -8,7 +8,7 @@ from sklearn.metrics import (
     accuracy_score, classification_report, confusion_matrix,
     mean_absolute_error, r2_score,
 )
-from utils import MASTER_INDEX_FILE, RANDOM_SEED, TRAIN_CUTOFF
+from utils import MASTER_INDEX_FILE, RANDOM_SEED, TRAIN_CUTOFF, VAL_CUTOFF
 
 np.random.seed(RANDOM_SEED)
 
@@ -183,13 +183,18 @@ def runSweep(index, trainIdx, testIdx, yRegTrain, yRegTest, yClsTrain, yClsTest)
 
 
 def fullEval(best, index, trainIdx, testIdx, yRegTrain, yRegTest, yClsTrain, yClsTest):
-    # TODO: rebuild features with best config, print all metrics + feature importance
+    # TODO: rebuild features with best config, retrain models, print all metrics + feature importance
     xTrain, xTest, hVec, bVec = buildFeatures(
         index, trainIdx, testIdx, best["n_headline"], best["n_body"])
 
-    ridge = best["ridge_model"]
-    logit = best["logit_model"]
-    ridgePreds = best["ridge_preds"]
+    ridge = Ridge(alpha=best["ridge_alpha"], random_state=RANDOM_SEED)
+    ridge.fit(xTrain, yRegTrain)
+    ridgePreds = ridge.predict(xTest)
+    
+    cw = "balanced" if best["logit_balanced"] else None
+    logit = LogisticRegression(C=1.0, max_iter=5000, class_weight=cw,
+                               random_state=RANDOM_SEED, solver="saga")
+    logit.fit(xTrain, yClsTrain)
     logitPreds = logit.predict(xTest)
 
     trueDirTrain = (yRegTrain > 0).astype(int)
@@ -260,15 +265,29 @@ def main():
     index = index.sort_values("target_date").reset_index(drop=True)
 
     isTrain = index["target_date"] <= TRAIN_CUTOFF
+    isVal = (index["target_date"] > TRAIN_CUTOFF) & (index["target_date"] <= VAL_CUTOFF)
+    isTest = index["target_date"] > VAL_CUTOFF
+    
     trainIdx = index[isTrain].index
-    testIdx = index[~isTrain].index
+    valIdx = index[isVal].index
+    testIdx = index[isTest].index
 
     yRegTrain = index.loc[trainIdx, "return"].values
+    yRegVal = index.loc[valIdx, "return"].values
     yRegTest = index.loc[testIdx,  "return"].values
     yClsTrain = index.loc[trainIdx, "direction"].values
+    yClsVal = index.loc[valIdx, "direction"].values
     yClsTest = index.loc[testIdx,  "direction"].values
 
-    best = runSweep(index, trainIdx, testIdx, yRegTrain, yRegTest, yClsTrain, yClsTest)
+    best = runSweep(index, trainIdx, valIdx, yRegTrain, yRegVal, yClsTrain, yClsVal)
+    # save locked config
+    with open("locked_config.txt", "w") as f:
+        f.write(f"headline={best['n_headline']}, body={best['n_body']}, ")
+        f.write(f"alpha={best['ridge_alpha']}, balanced={best['logit_balanced']}\n")
+
+    print("\nFinal eval with locked config:")
+    print(f"Locked config: headline={best['n_headline']}, body={best['n_body']}, "
+          f"alpha={best['ridge_alpha']}, balanced={best['logit_balanced']}")
     fullEval(best, index, trainIdx, testIdx, yRegTrain, yRegTest, yClsTrain, yClsTest)
 
 
